@@ -2,8 +2,6 @@
 
 **Built with:** ![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white) ![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=flat&logo=Streamlit&logoColor=white) ![MongoDB](https://img.shields.io/badge/MongoDB-47A248?style=flat&logo=mongodb&logoColor=white) ![OpenAI](https://img.shields.io/badge/OpenAI-74aa9c?style=flat&logo=openai&logoColor=white) ![Hume AI](https://img.shields.io/badge/Hume_AI-Empathic_AI-blue?logo=humeai&logoColor=white&style=flat)
 
-**Team Name:** Team ORS - We are going to rehydrate your dehydrated emotional health.
-
 **Contributors:** Om Thakur, Rigved Shirvalkar, Sohith Bandari (ORS)
 
 # Introduction
