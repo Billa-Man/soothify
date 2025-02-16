@@ -17,6 +17,7 @@ from settings import settings
 from utils.hume_utils.authenticator import Authenticator
 from utils.hume_utils.connection import Connection
 from utils.hume_utils.devices import AudioDevices
+from utils.audio_visualizer import lottie_audio_visualizer
 
 # Audio format and parameters
 FORMAT = pyaudio.paInt16
@@ -31,70 +32,6 @@ st.logo(
 
 # Set up a thread pool executor for non-blocking audio stream reading
 executor = ThreadPoolExecutor(max_workers=1)
-
-def lottie_audio_visualizer(audio_bytes: bytes, lottie_json: str):
-    """
-    Renders a Lottie animation that reacts to the audio's amplitude.
-    Audio and animation will loop indefinitely.
-    """
-    audio_base64 = base64.b64encode(audio_bytes).decode()
-
-    html_code = f"""
-    <div id="lottie-container" style="width: 300px; height: 300px; margin: 0 auto 20px auto;"></div>
-    <audio id="custom-audio" src="data:audio/mp3;base64,{audio_base64}" controls style="display:none;" loop></audio>
-    
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.7.5/lottie.min.js"></script>
-    
-    <script>
-      var lottieData = {lottie_json};
-      var anim = lottie.loadAnimation({{
-        container: document.getElementById('lottie-container'),
-        renderer: 'svg',
-        loop: true,
-        autoplay: false,
-        animationData: lottieData
-      }});
-      
-      var audioElement = document.getElementById('custom-audio');
-      var AudioContext = window.AudioContext || window.webkitAudioContext;
-      var audioCtx = new AudioContext();
-      var analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 256;
-      var bufferLength = analyser.frequencyBinCount;
-      var dataArray = new Uint8Array(bufferLength);
-      
-      var source = audioCtx.createMediaElementSource(audioElement);
-      source.connect(analyser);
-      analyser.connect(audioCtx.destination);
-      
-      function animate() {{
-          requestAnimationFrame(animate);
-          analyser.getByteFrequencyData(dataArray);
-          var sum = 0;
-          for (var i = 0; i < bufferLength; i++) {{
-              sum += dataArray[i];
-          }}
-          var average = sum / bufferLength;
-          var scale = 1 + average / 256;
-          document.getElementById('lottie-container').style.transform = 'scale(' + scale + ')';
-      }}
-      
-      audioElement.onplay = function() {{
-          if (audioCtx.state === 'suspended') {{
-              audioCtx.resume();
-          }}
-          anim.play();
-          animate();
-      }};
-      
-      // Remove the onended handler since we want continuous playback
-      
-      audioElement.play().catch(function(err) {{
-          console.log("Autoplay failed:", err);
-      }});
-    </script>
-    """
-    components.html(html_code, height=320)
     
 class StreamlitAudioChat:
     def __init__(self):
@@ -122,10 +59,6 @@ class StreamlitAudioChat:
             st.session_state.selected_input_device_name = None
         if 'selected_output_device_name' not in st.session_state:
             st.session_state.selected_output_device_name = None
-            
-        #---------- FIXES ----------
-        if 'stop_chat' not in st.session_state:
-            st.session_state.stop_chat = False
 
     def get_audio_devices(self):
         """
@@ -208,17 +141,10 @@ class StreamlitAudioChat:
 
             st.rerun()
 
-    def start_chat(self):
-        """
-        Set chat as active and trigger rerun
-        """
-        st.session_state.stop_chat = False
-
     def stop_chat(self):
         """
         Set chat as inactive and trigger rerun
         """
-        st.session_state.stop_chat = True
         if self.audio_stream:
             self.audio_stream.stop_stream()
             self.audio_stream.close()
@@ -257,49 +183,39 @@ class StreamlitAudioChat:
             f"access_token={st.session_state.access_token}"
         )
 
-        #---------- FIXES ----------
+        websocket_connection = Connection()
 
-        try:
-            while not st.session_state.stop_chat:
-                try:
-                    async with websockets.connect(socket_url) as socket:
-                        print("Connected to WebSocket")
-                        send_task = asyncio.create_task(
-                            Connection._send_audio_data(
-                                socket,
-                                self.audio_stream,
-                                sample_rate,
-                                SAMPLE_WIDTH,
-                                CHANNELS,
-                                CHUNK_SIZE,
-                            )
+        while True:
+            try:
+                async with websockets.connect(socket_url) as socket:
+                    logger.info("Connected to WebSocket")
+                    send_task = asyncio.create_task(
+                        websocket_connection._send_audio_data(
+                            socket,
+                            self.audio_stream,
+                            sample_rate,
+                            SAMPLE_WIDTH,
+                            CHANNELS,
+                            CHUNK_SIZE,
                         )
-                        receive_task = asyncio.create_task(
-                            Connection._receive_audio_data(socket, lottie_json_str)
-                        )
-                        
-                        # Wait for either task to complete or stop signal
-                        done, pending = await asyncio.wait(
-                            [send_task, receive_task],
-                            return_when=asyncio.FIRST_COMPLETED
-                        )
-                        
-                        # Cancel pending tasks
-                        for task in pending:
-                            task.cancel()
-                            
-                        if st.session_state.stop_chat:
-                            break
-                            
-                except websockets.exceptions.ConnectionClosed:
-                    if st.session_state.stop_chat:
-                        break
-                    print("WebSocket connection closed. Attempting to reconnect...")
-                    await asyncio.sleep(5)
+                    )
+
+                    #---------- FIXES ----------
+                    receive_task = asyncio.create_task(websocket_connection._receive_audio_data(socket, lottie_json_str))
                     
-        finally:
-            # Clean up resources
-            self.stop_chat()
+                    # Wait for either task to complete or stop signal
+                    await asyncio.gather(receive_task, send_task)
+                        
+            except websockets.exceptions.ConnectionClosed:
+                logger.info("WebSocket connection closed. Attempting to reconnect...")
+                await asyncio.sleep(5)
+
+            except Exception as e:
+                logger.error(f"An error occurred: {e}. Attempting to reconnect in 5 seconds...")
+                await asyncio.sleep(5)
+                    
+            finally:
+                self.stop_chat()
 
 
     def main(self):
@@ -343,7 +259,6 @@ class StreamlitAudioChat:
 
         # st.write(st.session_state)
 
-        
         # Initialize session state
         self.initialize_session_state()
         
@@ -398,7 +313,6 @@ class StreamlitAudioChat:
         col1, col2 = st.columns(2)
 
         if col1.button("Start Chat", disabled=start_disabled, key="start_button", use_container_width=True, type="secondary"):
-            self.start_chat()
             with st.spinner("Started audio chat..."):
                 asyncio.run(self.start_audio_stream(lottie_json_str))
         

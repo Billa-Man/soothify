@@ -11,6 +11,7 @@ import soundfile
 from playsound import playsound
 from pyaudio import Stream as PyAudioStream
 from concurrent.futures import ThreadPoolExecutor
+from loguru import logger
 
 # Set up a thread pool executor for non-blocking audio stream reading
 executor = ThreadPoolExecutor(max_workers=1)
@@ -27,7 +28,7 @@ class Connection:
 
     @classmethod
     async def connect(
-        cls,
+        self,
         socket_url: str,
         audio_stream: PyAudioStream,
         sample_rate: int,
@@ -52,10 +53,10 @@ class Connection:
         while True:
             try:
                 async with websockets.connect(socket_url) as socket:
-                    print("Connected to WebSocket")
+                    logger.info("Connected to WebSocket")
                     # Create tasks for sending and receiving audio data
                     send_task = asyncio.create_task(
-                        cls._send_audio_data(
+                        self._send_audio_data(
                             socket,
                             audio_stream,
                             sample_rate,
@@ -64,22 +65,22 @@ class Connection:
                             chunk_size,
                         )
                     )
-                    receive_task = asyncio.create_task(cls._receive_audio_data(socket))
+                    receive_task = asyncio.create_task(self._receive_audio_data(socket))
                     # Wait for both tasks to complete
                     await asyncio.gather(receive_task, send_task)
             except websockets.exceptions.ConnectionClosed:
-                print(
+                logger.info(
                     "WebSocket connection closed. Attempting to reconnect in 5 seconds..."
                 )
                 await asyncio.sleep(5)
             except Exception as e:
-                print(
+                logger.info(
                     f"An error occurred: {e}. Attempting to reconnect in 5 seconds..."
                 )
                 await asyncio.sleep(5)
 
     @classmethod
-    async def _receive_audio_data(cls, socket):
+    async def _receive_audio_data(self, socket, lottie_json_str):
         """
         Receive and process audio data from the WebSocket server.
 
@@ -94,7 +95,7 @@ class Connection:
                 try:
                     # Attempt to parse the JSON message
                     json_message = json.loads(message)
-                    print("Received JSON message:", json_message)
+                    logger.info("Received JSON message:", json_message)
 
                     # Check if the message type is 'audio_output'
                     if json_message.get("type") == "audio_output":
@@ -104,20 +105,20 @@ class Connection:
                         # Write the decoded audio data to a temporary file and play it
                         with tempfile.NamedTemporaryFile(delete=True, suffix=".wav") as tmpfile:
                             tmpfile.write(audio_data)
-                            tmpfile.flush()  # Ensure all data is written to disk
+                            tmpfile.flush()
                             playsound(tmpfile.name)
-                            print("Audio played")
+                            logger.info("Audio played")
 
                 except ValueError as e:
-                    print(f"Failed to parse JSON, error: {e}")
+                    logger.info(f"Failed to parse JSON, error: {e}")
                 except KeyError as e:
-                    print(f"Key error in JSON data: {e}")
+                    logger.info(f"Key error in JSON data: {e}")
 
         except Exception as e:
-            print(f"An error occurred while receiving audio: {e}")
+            logger.info(f"An error occurred while receiving audio: {e}")
 
     @classmethod
-    async def _read_audio_stream_non_blocking(cls, audio_stream, chunk_size):
+    async def _read_audio_stream_non_blocking(self, audio_stream, chunk_size):
         """
         Read a chunk of audio data from the PyAudio stream in a non-blocking manner.
 
@@ -136,7 +137,7 @@ class Connection:
 
     @classmethod
     async def _send_audio_data(
-        cls,
+        self,
         socket,
         audio_stream: PyAudioStream,
         sample_rate: int,
@@ -160,7 +161,7 @@ class Connection:
 
         while True:
             # Read audio data from the stream
-            data = await cls._read_audio_stream_non_blocking(audio_stream, chunk_size)
+            data = await self._read_audio_stream_non_blocking(audio_stream, chunk_size)
             if num_channels == 2:  # Stereo to mono conversion if stereo is detected
                 # Assuming the sample width is 2 bytes, hence 'int16'
                 stereo_data = np.frombuffer(data, dtype=np.int16)
