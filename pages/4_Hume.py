@@ -32,7 +32,6 @@ st.logo(
 # Set up a thread pool executor for non-blocking audio stream reading
 executor = ThreadPoolExecutor(max_workers=1)
 
-
 def lottie_audio_visualizer(audio_bytes: bytes, lottie_json: str):
     """
     Renders a Lottie animation that reacts to the audio's amplitude.
@@ -115,13 +114,23 @@ class StreamlitAudioChat:
             st.session_state.selected_input_device = None
         if 'selected_output_device' not in st.session_state:
             st.session_state.selected_output_device = None
-        if 'chat_active' not in st.session_state:
-            st.session_state.chat_active = False
+        if 'is_input_device_selected' not in st.session_state:
+            st.session_state.is_input_device_selected = False
+        if 'is_output_device_selected' not in st.session_state:
+            st.session_state.is_output_device_selected = False
+        if 'selected_input_device_name' not in st.session_state:
+            st.session_state.selected_input_device_name = None
+        if 'selected_output_device_name' not in st.session_state:
+            st.session_state.selected_output_device_name = None
+            
+        #---------- FIXES ----------
         if 'stop_chat' not in st.session_state:
             st.session_state.stop_chat = False
 
     def get_audio_devices(self):
-        """Get available audio input and output devices"""
+        """
+        Get available audio input and output devices
+        """
         return AudioDevices.list_audio_devices(self.pyaudio)
 
     def authenticate(self):
@@ -135,7 +144,7 @@ class StreamlitAudioChat:
         api_key = settings.HUME_API_KEY or st.sidebar.text_input("Hume API Key", type="password")
         secret_key = settings.HUME_SECRET_KEY or st.sidebar.text_input("Hume Secret Key", type="password")
         
-        if st.sidebar.button("Authenticate"):
+        if st.sidebar.button("Authenticate", use_container_width=True, type="primary"):
             if api_key and secret_key:
                 try:
                     authenticator = Authenticator(api_key, secret_key)
@@ -143,6 +152,7 @@ class StreamlitAudioChat:
                     st.session_state.access_token = access_token
                     st.session_state.authenticated = True
                     st.sidebar.success("Authentication successful!")
+                    st.rerun()
                 except Exception as e:
                     st.sidebar.error(f"Authentication failed: {str(e)}")
             else:
@@ -164,7 +174,7 @@ class StreamlitAudioChat:
             input_device_names,
             index=0 if input_device_names else None
         )
-        selected_input = input_device_names[0]
+        st.session_state.selected_input_device_name = selected_input
         
         # Output device selection
         output_device_names = [f"{name} ({idx})" for idx, name, _ in output_devices]
@@ -173,27 +183,46 @@ class StreamlitAudioChat:
             output_device_names,
             index=0 if output_device_names else None
         )
-        selected_output = output_device_names[0]
+        st.session_state.selected_output_device_name = selected_output
         
-        if st.sidebar.button("Configure Devices"):
-            if selected_input and selected_output:
+        if st.sidebar.button("Configure Devices", use_container_width=True, type="primary") and selected_input and selected_output:
+            try:
                 input_idx = int(selected_input.split("(")[-1].strip(")"))
                 output_idx = int(selected_output.split("(")[-1].strip(")"))
                 
                 # Find the selected input device's sample rate
                 input_device = next((device for device in input_devices if device[0] == input_idx), None)
-                if input_device:
-                    sample_rate = input_device[2]
-                    
-                    # Store selected devices in session state
-                    st.session_state.selected_input_device = (input_idx, sample_rate)
-                    st.session_state.selected_output_device = output_idx
-                    
-                    st.sidebar.success("Audio devices configured successfully!")
-                else:
-                    st.sidebar.error("Failed to get input device information")
-            else:
+                # if input_device:
+                sample_rate = input_device[2]
+                
+                # Store selected devices in session state
+                st.session_state.selected_input_device = (input_idx, sample_rate)
+                st.session_state.selected_output_device = output_idx
+                st.session_state.is_input_device_selected = True
+                st.session_state.is_output_device_selected = True
+                st.sidebar.success("Audio devices configured successfully!")
+                # else:
+                #     st.sidebar.error("Failed to get input device information")
+            except:
                 st.sidebar.error("Please select both input and output devices")
+
+            st.rerun()
+
+    def start_chat(self):
+        """
+        Set chat as active and trigger rerun
+        """
+        st.session_state.stop_chat = False
+
+    def stop_chat(self):
+        """
+        Set chat as inactive and trigger rerun
+        """
+        st.session_state.stop_chat = True
+        if self.audio_stream:
+            self.audio_stream.stop_stream()
+            self.audio_stream.close()
+            self.audio_stream = None
 
     async def start_audio_stream(self, lottie_json_str):
         """
@@ -201,8 +230,8 @@ class StreamlitAudioChat:
         """
         if not all([
             st.session_state.authenticated,
-            st.session_state.selected_input_device,
-            st.session_state.selected_output_device
+            st.session_state.is_input_device_selected,
+            st.session_state.is_output_device_selected,
         ]):
             st.error("Please complete authentication and device setup first")
             return
@@ -227,6 +256,8 @@ class StreamlitAudioChat:
             "wss://api.hume.ai/v0/assistant/chat?"
             f"access_token={st.session_state.access_token}"
         )
+
+        #---------- FIXES ----------
 
         try:
             while not st.session_state.stop_chat:
@@ -268,34 +299,8 @@ class StreamlitAudioChat:
                     
         finally:
             # Clean up resources
-            if self.audio_stream:
-                self.audio_stream.stop_stream()
-                self.audio_stream.close()
-                self.audio_stream = None
-            st.session_state.chat_active = False
-            st.session_state.stop_chat = False
+            self.stop_chat()
 
-    def stop_audio_stream(self):
-        """Stop the audio stream and WebSocket connection"""
-        st.session_state.stop_chat = True
-        if self.audio_stream:
-            self.audio_stream.stop_stream()
-            self.audio_stream.close()
-            self.audio_stream = None
-
-    def start_chat(self):
-        """Set chat as active and trigger rerun"""
-        st.session_state.chat_active = True
-        st.session_state.stop_chat = False
-
-    def stop_chat(self):
-        """Set chat as inactive and trigger rerun"""
-        st.session_state.chat_active = False
-        st.session_state.stop_chat = True
-        if self.audio_stream:
-            self.audio_stream.stop_stream()
-            self.audio_stream.close()
-            self.audio_stream = None
 
     def main(self):
 
@@ -336,9 +341,8 @@ class StreamlitAudioChat:
             </div>
         """, unsafe_allow_html=True)
 
+        # st.write(st.session_state)
 
-        # """Main Streamlit application"""
-        # st.title("Hume AI Voice Chat")
         
         # Initialize session state
         self.initialize_session_state()
@@ -347,8 +351,20 @@ class StreamlitAudioChat:
         self.authenticate()
         self.setup_audio_devices()
 
+        st.sidebar.info("""
+            ### Instructions:
+            1. Click 'Authenticate' to connect to Hume AI.
+            2. Click 'Configure Devices' to select your input and output devices.
+            3. Click 'Start Chat' to begin the conversation
+            4. Speak clearly into your microphone
+            5. The AI assistant's responses will play through your selected output device
+            6. Click 'Stop Chat' to end the conversation
+            """)
+
+        # Load Lottie animation and audio
         with open("media/hume.json", "r") as f:
             lottie_data = json.load(f)
+
         lottie_json_str = json.dumps(lottie_data)
 
         try:
@@ -358,46 +374,38 @@ class StreamlitAudioChat:
             st.error("Missing 'media/silence.mp3' file for default audio.")
             return
 
+        start_disabled = not all([
+            st.session_state.authenticated,
+            st.session_state.is_input_device_selected,
+            st.session_state.is_output_device_selected
+        ])
+
+        # Display chat status and instructions
+        if st.session_state.authenticated:
+            st.info(f"Status: {'Connected to Hume AI - Chat Active' if not start_disabled else 'Connected to Hume AI - Chat Inactive'}")
+        else:
+            st.warning("Please authenticate using your Hume AI credentials in the sidebar")
+        
+
+        if(st.session_state.is_output_device_selected and st.session_state.is_input_device_selected):
+            st.write("Input Device: ", st.session_state.selected_input_device_name)
+            st.write("Output Device: ", st.session_state.selected_output_device_name)
+
         # Display the animation container
         lottie_audio_visualizer(audio_bytes, lottie_json_str)
-        
-        # Main chat interface
-        st.header("Chat Interface")
-        
+
         # Create columns for Start and Stop buttons
         col1, col2 = st.columns(2)
-        
-        # Start button
-        # start_disabled = not all([
-        #     st.session_state.authenticated,
-        #     st.session_state.selected_input_device,
-        #     st.session_state.selected_output_device
-        # ]) or st.session_state.chat_active
 
-        start_disabled = False
-        
-        if col1.button("Start Chat", disabled=start_disabled, key="start_button"):
+        if col1.button("Start Chat", disabled=start_disabled, key="start_button", use_container_width=True, type="secondary"):
             self.start_chat()
             with st.spinner("Started audio chat..."):
                 asyncio.run(self.start_audio_stream(lottie_json_str))
         
         # Stop button
-        if col2.button("Stop Chat", key="stop_button"):
+        if col2.button("Stop Chat", key="stop_button", use_container_width=True, type="primary"):
             self.stop_chat()
         
-        # Display chat status and instructions
-        # if st.session_state.authenticated:
-        st.info(f"Status: {'Connected to Hume AI - Chat Active' if st.session_state.chat_active else 'Connected to Hume AI - Chat Inactive'}")
-        st.sidebar.info("""
-        ### Instructions:
-        1. Click 'Start Chat' to begin the conversation
-        2. Speak clearly into your microphone
-        3. The AI assistant's responses will play through your selected output device
-        4. Click 'Stop Chat' to end the conversation
-        """)
-        # else:
-        #     st.warning("Please authenticate using your Hume AI credentials in the sidebar")
-
 
 if __name__ == "__main__":
     app = StreamlitAudioChat()
