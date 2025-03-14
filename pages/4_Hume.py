@@ -38,8 +38,8 @@ class StreamlitAudioChat:
         self.pyaudio = pyaudio.PyAudio()
         self.audio_stream = None
         self.is_recording = False
-        self.audio_queue = queue.Queue()
-        self.task = None
+        self.running = False
+        self.websocket = None
         
     def initialize_session_state(self):
         """Initialize Streamlit session state variables"""
@@ -59,6 +59,8 @@ class StreamlitAudioChat:
             st.session_state.selected_input_device_name = None
         if 'selected_output_device_name' not in st.session_state:
             st.session_state.selected_output_device_name = None
+        if 'is_chat_active' not in st.session_state:
+            st.session_state.is_chat_active = False
 
     def get_audio_devices(self):
         """
@@ -134,8 +136,6 @@ class StreamlitAudioChat:
                 st.session_state.is_input_device_selected = True
                 st.session_state.is_output_device_selected = True
                 st.sidebar.success("Audio devices configured successfully!")
-                # else:
-                #     st.sidebar.error("Failed to get input device information")
             except:
                 st.sidebar.error("Please select both input and output devices")
 
@@ -145,10 +145,25 @@ class StreamlitAudioChat:
         """
         Set chat as inactive and trigger rerun
         """
+        self.running = False
+        if self.websocket:
+            asyncio.create_task((self.websocket.close()))
+            self.websocket = None
+
         if self.audio_stream:
-            self.audio_stream.stop_stream()
-            self.audio_stream.close()
+            try:
+                self.audio_stream.stop_stream()
+                self.audio_stream.close()
+            except:
+                pass
             self.audio_stream = None
+
+        if self.pyaudio:
+            self.pyaudio.terminate()
+            self.pyaudio = None
+
+        st.session_state.is_chat_active = False
+        st.rerun()
 
     async def start_audio_stream(self, lottie_json_str):
         """
@@ -162,6 +177,7 @@ class StreamlitAudioChat:
             st.error("Please complete authentication and device setup first")
             return
 
+        self.running = True
         input_idx, sample_rate = st.session_state.selected_input_device
         output_idx = st.session_state.selected_output_device
 
@@ -185,10 +201,11 @@ class StreamlitAudioChat:
 
         websocket_connection = Connection()
 
-        while True:
+        while self.running:
             try:
                 async with websockets.connect(socket_url) as socket:
                     logger.info("Connected to WebSocket")
+                    self.websocket = socket
                     send_task = asyncio.create_task(
                         websocket_connection._send_audio_data(
                             socket,
@@ -200,22 +217,33 @@ class StreamlitAudioChat:
                         )
                     )
 
-                    #---------- FIXES ----------
                     receive_task = asyncio.create_task(websocket_connection._receive_audio_data(socket, lottie_json_str))
                     
-                    # Wait for either task to complete or stop signal
-                    await asyncio.gather(receive_task, send_task)
+                    # Wait for either task to complete
+                    done, pending = await asyncio.wait(
+                        [send_task, receive_task],
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+
+                    for task in pending:
+                        task.cancel()
+                    
+                    if not self.running:
+                        break
                         
             except websockets.exceptions.ConnectionClosed:
+                if not self.running:
+                    break
                 logger.info("WebSocket connection closed. Attempting to reconnect...")
                 await asyncio.sleep(5)
 
             except Exception as e:
+                if not self.running:
+                    break
                 logger.error(f"An error occurred: {e}. Attempting to reconnect in 5 seconds...")
                 await asyncio.sleep(5)
                     
-            finally:
-                self.stop_chat()
+        self.stop_chat()
 
 
     def main(self):
@@ -313,11 +341,13 @@ class StreamlitAudioChat:
         col1, col2 = st.columns(2)
 
         if col1.button("Start Chat", disabled=start_disabled, key="start_button", use_container_width=True, type="secondary"):
+            st.session_state.is_chat_active = True
             with st.spinner("Started audio chat..."):
                 asyncio.run(self.start_audio_stream(lottie_json_str))
         
         # Stop button
         if col2.button("Stop Chat", key="stop_button", use_container_width=True, type="primary"):
+            logger.info("Stopping chat...")
             self.stop_chat()
         
 
