@@ -4,14 +4,22 @@ import streamlit.components.v1 as components
 def lottie_audio_visualizer(audio_bytes: bytes, lottie_json: str):
     """
     Renders a Lottie animation that reacts to the audio's amplitude.
-    Audio and animation will loop indefinitely.
     """
+    # Convert audio bytes to a Base64 string
     audio_base64 = base64.b64encode(audio_bytes).decode()
-
-    html_code = f"""
-    <div id="lottie-container" style="width: 300px; height: 300px; margin: 0 auto 20px auto;"></div>
-    <audio id="custom-audio" src="data:audio/mp3;base64,{audio_base64}" controls style="display:none;" loop></audio>
     
+    # Build the HTML/JavaScript code.
+    html_code = f"""
+    <div id="lottie-container" style="
+            width: 300px;
+            height: 300px;
+            margin: 0 auto 20px auto;
+        ">
+    </div>
+    <!-- Hidden audio element -->
+    <audio id="custom-audio" src="data:audio/mp3;base64,{audio_base64}" controls style="display:none;"></audio>
+    
+    <!-- Include Lottie-web -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.7.5/lottie.min.js"></script>
     
     <script>
@@ -20,7 +28,7 @@ def lottie_audio_visualizer(audio_bytes: bytes, lottie_json: str):
         container: document.getElementById('lottie-container'),
         renderer: 'svg',
         loop: true,
-        autoplay: false,
+        autoplay: true,
         animationData: lottieData
       }});
       
@@ -44,7 +52,7 @@ def lottie_audio_visualizer(audio_bytes: bytes, lottie_json: str):
               sum += dataArray[i];
           }}
           var average = sum / bufferLength;
-          var scale = 1 + average / 256;
+          var scale = 0.9 + average / 256;
           document.getElementById('lottie-container').style.transform = 'scale(' + scale + ')';
       }}
       
@@ -52,11 +60,8 @@ def lottie_audio_visualizer(audio_bytes: bytes, lottie_json: str):
           if (audioCtx.state === 'suspended') {{
               audioCtx.resume();
           }}
-          anim.play();
           animate();
       }};
-      
-      // Remove the onended handler since we want continuous playback
       
       audioElement.play().catch(function(err) {{
           console.log("Autoplay failed:", err);

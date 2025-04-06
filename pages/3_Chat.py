@@ -1,7 +1,5 @@
-import base64
 import json
 import streamlit as st
-import streamlit.components.v1 as components
 from openai import OpenAI, AuthenticationError
 from streamlit_mic_recorder import mic_recorder
 
@@ -15,9 +13,6 @@ if "audio_output" not in st.session_state:
     st.session_state.audio_output = None
 if "valid_key" not in st.session_state:
     st.session_state.valid_key = None
-
-# (Remove the static client initialization that uses settings.OPENAI_API_KEY)
-# Instead, we will initialize the client once the user authenticates.
 
 st.logo(
     image="media/mainlogo.png",
@@ -99,9 +94,7 @@ def main():
         </div>
     """, unsafe_allow_html=True)
 
-    # -------------------------------
-    # Sidebar: OpenAI API Key Authenticator
-    # -------------------------------
+    # Sidebar
     with st.sidebar:
         st.header("API Key Authentication")
         api_key_input = st.text_input("Enter your OpenAI API Key", type="password")
@@ -124,10 +117,6 @@ def main():
     
     # Initialize the OpenAI client with the authenticated API key
     client = OpenAI(api_key=settings.OPENAI_API_KEY)
-    
-    # -------------------------------
-    # Main App Logic
-    # -------------------------------
     
     # Load Lottie animation JSON data for the Siri wave.
     try:
